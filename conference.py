@@ -3,9 +3,6 @@
 """
 conference.py -- Udacity conference server-side Python App Engine API;
     uses Google Cloud Endpoints
-
-$Id: conference.py,v 1.25 2014/05/24 23:42:19 wesc Exp wesc $
-
 """
 
 from datetime import datetime
@@ -31,11 +28,10 @@ from models import ConferenceForms
 from models import ConferenceQueryForm
 from models import ConferenceQueryForms
 from models import TeeShirtSize
+from models import Session, SessionForm, SessionForms, SessionType
+from models import Speaker, SpeakerForm
 
 from settings import WEB_CLIENT_ID
-from settings import ANDROID_CLIENT_ID
-from settings import IOS_CLIENT_ID
-from settings import ANDROID_AUDIENCE
 
 from utils import getUserId
 
@@ -53,13 +49,28 @@ DEFAULTS = {
     "topics": [ "Default", "Topic" ],
 }
 
+SPEAKER_DEFAULTS = {
+    "company": "Udacity",
+    "email": "help@udacity.com",
+    "phone": "555-555-555",
+    "websiteUrl": "https://www.udacity.com",
+}
+
+SESSION_DEFAULTS = {
+    "date": "2015-06-06",
+    "highlights": ["Code labs", "Tutor"],
+    "duration": 60,
+    "startTime": "00:00",
+    "typeOfSession": "NOT_SPECIFIED",
+}
+
 OPERATORS = {
             'EQ':   '=',
             'GT':   '>',
             'GTEQ': '>=',
             'LT':   '<',
             'LTEQ': '<=',
-            'NE':   '!='
+            'NE':   '!=',
             }
 
 FIELDS =    {
@@ -77,6 +88,19 @@ CONF_GET_REQUEST = endpoints.ResourceContainer(
 CONF_POST_REQUEST = endpoints.ResourceContainer(
     ConferenceForm,
     websafeConferenceKey=messages.StringField(1),
+)
+
+SESSION_POST_REQUEST = endpoints.ResourceContainer(
+    SessionForm,
+    websafeConferenceKey=messages.StringField(1, required=True),
+    websafeSpeakerKey=messages.StringField(2, required=True)
+)
+
+SESSION_TYPE_GET_REQUEST = endpoints.ResourceContainer(
+    message_types.VoidMessage,
+    websafeConferenceKey=messages.StringField(1, required=True),
+    websafeSpeakerKey=messages.StringField(2, required=True),
+    typeOfSession=messages.EnumField(SessionType, 3, required=True),
 )
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -322,6 +346,193 @@ class ConferenceApi(remote.Service):
                 items=[self._copyConferenceToForm(conf, names[conf.organizerUserId]) for conf in \
                 conferences]
         )
+
+# - - - Session objects - - - - - - - - - - - - - - - - - - -
+
+    def _copySessionToForm(self, session):
+        """Copy relevant fields from Session to SessionForm."""
+        sf = SessionForm()
+        for field in sf.all_fields():
+            if hasattr(session, field.name):
+                # convert Date to date string; just copy others
+                if field.name == 'date':
+                    setattr(sf, field.name, str(getattr(session, field.name)))
+                elif field.name == 'startTime':
+                    setattr(sf, field.name, getattr(session, field.name).strftime('%H:%M'))
+                elif field.name == 'typeOfSession':
+                    setattr(sf, field.name, getattr(SessionType, getattr(session, field.name)))
+                else:
+                    setattr(sf, field.name, getattr(session, field.name))
+            elif field.name == 'websafeKey':
+                setattr(sf, field.name, session.key.urlsafe())
+        sf.check_initialized()
+        return sf
+
+    @ndb.transactional(xg=True)
+    def _createSessionObject(self, request):
+        """Create session object"""
+        # preload necessary data items
+        user = endpoints.get_current_user()
+        if not user:
+            raise endpoints.UnauthorizedException('Authorization required')
+
+        user_id = getUserId(user)
+
+        # Get conference object
+        conference = ndb.Key(urlsafe=request.websafeConferenceKey).get()
+        if not conference:
+            raise endpoints.NotFoundException('No conference entity found using websafe key : %s' \
+                % (request.websafeConferenceKey))
+        
+        if user_id != conference.organizerUserId:
+            raise endpoints.UnauthorizedException('Only the conference organizer can add sessions')
+
+        # Verify speaker exists
+        speaker = ndb.Key(urlsafe=request.websafeSpeakerKey).get()
+        if not speaker:
+            raise endpoints.NotFoundException('No speaker entity found using websafe key : %s' \
+                % (request.websafeSpeakerKey))
+
+        if not request.name:
+            raise endpoints.BadRequestException("Session 'name' field required")
+
+        # copy SessionForm into dict
+        data = {field.name: getattr(request, field.name) for field in request.all_fields()}
+        del data['websafeConferenceKey']
+        del data['websafeSpeakerKey']
+        del data['websafeKey']
+
+        for df in SESSION_DEFAULTS:
+            if data[df] in (None, []):
+                data[df] = SESSION_DEFAULTS[df]
+                setattr(request, df, SESSION_DEFAULTS[df])
+
+        data['typeOfSession'] = str(data['typeOfSession'])
+        # convert dates from strings to Date objects;
+        if data['date']:
+            data['date'] = datetime.strptime(data['date'][:10], '%Y-%m-%d').date()
+        if data['startTime']:
+            data['startTime']=datetime.strptime(data['startTime'], '%H-%M').time()
+
+        s_id = Session.allocate_ids(size=1, parent=conference.key)[0]
+        s_key = ndb.Key(Session, s_id, parent=conference.key)
+        data['key'] = s_key
+        data['speaker'] = speaker.key
+        
+        # Create Session
+        Session(**data).put()
+
+        # Update speaker with new session
+        speaker.sessionKeys.append(session.key)
+        speaker.put()
+
+        return request
+
+    def _getConferenceSessions(self, request):
+        # Get conference object
+        conference = ndb.Key(urlsafe=request.websafeConferenceKey).get()
+        if not conference:
+            raise endpoints.NotFoundException('No conference entity found using websafe key : %s' \
+                % (request.websafeConferenceKey))
+        # Get all sesssions associated to conference
+        return Session.query(Session.conference == conference.key).fetch()
+
+    def _getConferenceSessionsByType(self, request):
+        # Get conference object
+        conference = ndb.Key(urlsafe=request.websafeConferenceKey).get()
+        if not conference:
+            raise endpoints.NotFoundException('No conference entity found using websafe key : %s' \
+                % (request.websafeConferenceKey))
+        # Get all sessions associated to conference and requested type
+        sessions = Session.query(
+                Session.conference == conference.key,
+                Session.typeOfSession == str(request.typeOfSession)
+            ).fetch()
+        return sessions
+
+    def _getSessionsBySpeaker(self, request):
+        #Get speaker object
+        speaker = ndb.Key(urlsafe=request.websafeSpeakerKey).get()
+        if not speaker:
+            raise endpoints.NotFoundException('No speaker entity found using websafeKey : %s' \
+                % (request.websafeSpeakerKey))
+        return ndb.get_multi(speaker.sessions)
+
+
+    @endpoints.method(SESSION_POST_REQUEST, SessionForm,
+            path='conference/{websafeConferenceKey}/createSession',
+            http_method='POST', name='createSession')
+    def createSession(self, request):
+        """Update & return Session object"""
+        return self._createSessionObject(request)
+
+
+    @endpoints.method(CONF_GET_REQUEST, SessionForms,
+            path='conference/{websafeConferenceKey}/sessions',
+            http_method='GET', name='getConferenceSessions')
+    def getConferenceSessions(self, request):
+        """Get list of conference sessions"""
+        sessions = self._getConferenceSessions(request)
+        return SessionForms(
+                items=[self._copySessionToForm(session) for session in \
+                sessions])
+
+
+    @endpoints.method(SESSION_TYPE_GET_REQUEST, SessionForms,
+            path='conference/{websafeConferenceKey}/sessionsbytype',
+            http_method='GET', name='getConferenceSessionsByType')
+    def getConferenceSessionsByType(self, request):
+        """Get list of conference sessions associated with a conference by type"""
+        sessions = self._getConferenceSessionsByType(request)
+        return SessionForms(
+                items=[self._copySessionToForm(session) for session in \
+                sessions])
+
+
+    @endpoints.method(SESSION_TYPE_GET_REQUEST, SessionForms,
+            path='speaker/{websafeSpeakerKey}/sessions',
+            http_method='GET', name='getSessionsBySpeaker')
+    def getSessionsBySpeaker(self, request):
+        """Get list of sessions associated with a speaker"""
+        sessions = self._getSessionsBySpeaker(request)
+        return SessionForms(
+                items=[self._copySessionToForm(session) for session in \
+                sessions])
+
+
+
+# - - - Speaker objects - - - - - - - - - - - - - - - - - - -
+    
+    def _createSpeakerObject(self, request):
+        """Create or Update speaker object"""
+        # preload necessary data items
+        user = endpoints.get_current_user()
+        if not user:
+            raise endpoints.UnauthorizedException('Authorization required')
+
+        if not request.name:
+            raise endpoints.BadRequestException("Speaker 'name' field required")
+
+        # copy SpeakerForm Message into dict
+        data = {field.name: getattr(request, field.name) for field in request.all_fields()}
+        del data['websafeKey']
+
+        # add default values for those missing (both data model & outbound Message)
+        for df in SPEAKER_DEFAULTS:
+            if data[df] in (None, []):
+                data[df] = SPEAKER_DEFAULTS[df]
+                setattr(request, df, SPEAKER_DEFAULTS[df])
+
+        # create Speaker & return SpeakerForm
+        Speaker(**data).put()
+        return request
+
+
+    @endpoints.method(SpeakerForm, SpeakerForm,
+        path='speaker', http_method='POST', name='createSpeaker')
+    def createSpeaker(self, request):
+        """Update & return speaker object"""
+        return self._createSpeakerObject(request)
 
 
 # - - - Profile objects - - - - - - - - - - - - - - - - - - -
