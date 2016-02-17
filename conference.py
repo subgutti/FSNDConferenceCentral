@@ -90,6 +90,11 @@ CONF_POST_REQUEST = endpoints.ResourceContainer(
     websafeConferenceKey=messages.StringField(1),
 )
 
+SESSION_GET_REQUEST = endpoints.ResourceContainer(
+    message_types.VoidMessage,
+    websafeSessionKey=messages.StringField(1, required=True),
+)
+
 SESSION_POST_REQUEST = endpoints.ResourceContainer(
     SessionForm,
     websafeConferenceKey=messages.StringField(1, required=True),
@@ -460,6 +465,55 @@ class ConferenceApi(remote.Service):
         return ndb.get_multi(speaker.sessionKeys)
 
 
+    def _sessionToUserWishlist(self, request, reg=True):
+        retval = None
+
+        # get user Profile
+        prof = self._getProfileFromUser()
+
+        # check if Session exists given websafeConfKey
+        wssk = request.websafeSessionKey
+        session = ndb.Key(urlsafe=wssk).get()
+        if not session:
+            raise endpoints.NotFoundException(
+                'No Session found with key: %s' % wsck)
+
+        # register
+        if reg:
+            # check if user already added Session to wishlist
+            if wssk in prof.sessionsWishlist:
+                raise ConflictException(
+                    "You have already added session to wishlist")
+
+            # Add session to wishlist
+            prof.sessionsWishlist.append(wssk)
+            retval = True
+
+        # unregister
+        else:
+            # check if user already added Session to wishlist
+            if wssk in prof.sessionsWishlist:
+                # remove from wishlist
+                prof.sessionsWishlist.remove(wssk)
+                retval = True
+            else:
+                retval = False
+
+        # write things back to the datastore & return
+        prof.put()
+        return BooleanMessage(data=retval)
+
+    def _getSessionsInWishlist(self):
+        # get user Profile
+        prof = self._getProfileFromUser()
+
+        # get sessions in user wishlist
+        session_keys = [ndb.Key(urlsafe=wssk) for wssk in prof.sessionsWishlist]
+        sessions = ndb.get_multi(session_keys)
+
+        return sessions
+
+
     @endpoints.method(SESSION_POST_REQUEST, SessionForm,
             path='conference/{websafeConferenceKey}/createSession',
             http_method='POST', name='createSession')
@@ -500,6 +554,34 @@ class ConferenceApi(remote.Service):
                 items=[self._copySessionToForm(session) for session in \
                 sessions])
 
+
+    @endpoints.method(SESSION_GET_REQUEST, BooleanMessage,
+            path='sessions/wishlist/{websafeSessionKey}',
+            http_method='POST', name='addSessionToWishlist')
+    def addSessionToWishlist(self, request):
+        """Add session to the user's wishlist"""
+        return self._sessionToUserWishlist(request)
+    
+
+
+    @endpoints.method(SESSION_GET_REQUEST, BooleanMessage,
+            path='sessions/wishlist/{websafeSessionKey}',
+            http_method='DELETE', name='removeSessionFromWishlist')
+    def removeSessionFromWishlist(self, request):
+        """Remove session from user's wishlist"""
+        return self._sessionToUserWishlist(request, reg=False)
+    
+
+
+    @endpoints.method(message_types.VoidMessage, SessionForms,
+            path='sessions/wishlist',
+            http_method='GET', name='getSessionsInWishlist')
+    def getSessionsInWishlist(self, request):
+        """Get list of sessions in user's wishlist"""
+        sessions = self._getSessionsInWishlist()
+        return SessionForms(
+                items=[self._copySessionToForm(session) for session in \
+                sessions])
 
 
 # - - - Speaker objects - - - - - - - - - - - - - - - - - - -
