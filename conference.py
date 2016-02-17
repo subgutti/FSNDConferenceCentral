@@ -29,7 +29,7 @@ from models import ConferenceQueryForm
 from models import ConferenceQueryForms
 from models import TeeShirtSize
 from models import Session, SessionForm, SessionForms, SessionType
-from models import Speaker, SpeakerForm
+from models import Speaker, SpeakerForm, SpeakerForms
 
 from settings import WEB_CLIENT_ID
 
@@ -61,7 +61,7 @@ SESSION_DEFAULTS = {
     "highlights": ["Code labs", "Tutor"],
     "duration": 60,
     "startTime": "00:00",
-    "typeOfSession": "NOT_SPECIFIED",
+    "typeOfSession": SessionType.NOT_SPECIFIED,
 }
 
 OPERATORS = {
@@ -99,8 +99,12 @@ SESSION_POST_REQUEST = endpoints.ResourceContainer(
 SESSION_TYPE_GET_REQUEST = endpoints.ResourceContainer(
     message_types.VoidMessage,
     websafeConferenceKey=messages.StringField(1, required=True),
-    websafeSpeakerKey=messages.StringField(2, required=True),
-    typeOfSession=messages.EnumField(SessionType, 3, required=True),
+    typeOfSession=messages.EnumField(SessionType, 2, required=True),
+)
+
+SESSION_SPEAKER_GET_REQUEST = endpoints.ResourceContainer(
+    message_types.VoidMessage,
+    websafeSpeakerKey=messages.StringField(2, required=True)
 )
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -368,7 +372,6 @@ class ConferenceApi(remote.Service):
         sf.check_initialized()
         return sf
 
-    @ndb.transactional(xg=True)
     def _createSessionObject(self, request):
         """Create session object"""
         # preload necessary data items
@@ -412,7 +415,7 @@ class ConferenceApi(remote.Service):
         if data['date']:
             data['date'] = datetime.strptime(data['date'][:10], '%Y-%m-%d').date()
         if data['startTime']:
-            data['startTime']=datetime.strptime(data['startTime'], '%H-%M').time()
+            data['startTime']=datetime.strptime(data['startTime'], '%H:%M').time()
 
         s_id = Session.allocate_ids(size=1, parent=conference.key)[0]
         s_key = ndb.Key(Session, s_id, parent=conference.key)
@@ -423,10 +426,10 @@ class ConferenceApi(remote.Service):
         Session(**data).put()
 
         # Update speaker with new session
-        speaker.sessionKeys.append(session.key)
+        speaker.sessionKeys.append(s_key)
         speaker.put()
 
-        return request
+        return self._copySessionToForm(s_key.get())
 
     def _getConferenceSessions(self, request):
         # Get conference object
@@ -435,7 +438,7 @@ class ConferenceApi(remote.Service):
             raise endpoints.NotFoundException('No conference entity found using websafe key : %s' \
                 % (request.websafeConferenceKey))
         # Get all sesssions associated to conference
-        return Session.query(Session.conference == conference.key).fetch()
+        return Session.query(ancestor=conference.key)
 
     def _getConferenceSessionsByType(self, request):
         # Get conference object
@@ -444,11 +447,9 @@ class ConferenceApi(remote.Service):
             raise endpoints.NotFoundException('No conference entity found using websafe key : %s' \
                 % (request.websafeConferenceKey))
         # Get all sessions associated to conference and requested type
-        sessions = Session.query(
-                Session.conference == conference.key,
-                Session.typeOfSession == str(request.typeOfSession)
-            ).fetch()
-        return sessions
+        q = Session.query(ancestor=conference.key)
+        q = q.filter(Session.typeOfSession==str(request.typeOfSession))
+        return q
 
     def _getSessionsBySpeaker(self, request):
         #Get speaker object
@@ -456,7 +457,7 @@ class ConferenceApi(remote.Service):
         if not speaker:
             raise endpoints.NotFoundException('No speaker entity found using websafeKey : %s' \
                 % (request.websafeSpeakerKey))
-        return ndb.get_multi(speaker.sessions)
+        return ndb.get_multi(speaker.sessionKeys)
 
 
     @endpoints.method(SESSION_POST_REQUEST, SessionForm,
@@ -489,7 +490,7 @@ class ConferenceApi(remote.Service):
                 sessions])
 
 
-    @endpoints.method(SESSION_TYPE_GET_REQUEST, SessionForms,
+    @endpoints.method(SESSION_SPEAKER_GET_REQUEST, SessionForms,
             path='speaker/{websafeSpeakerKey}/sessions',
             http_method='GET', name='getSessionsBySpeaker')
     def getSessionsBySpeaker(self, request):
@@ -503,6 +504,17 @@ class ConferenceApi(remote.Service):
 
 # - - - Speaker objects - - - - - - - - - - - - - - - - - - -
     
+    def _copySpeakerToForm(self, speaker):
+        """Copy relevant fields from Speaker to SpeakerForm."""
+        sf = SpeakerForm()
+        for field in sf.all_fields():
+            if hasattr(speaker, field.name):
+                setattr(sf, field.name, getattr(speaker, field.name))
+            elif field.name == "websafeKey":
+                setattr(sf, field.name, speaker.key.urlsafe())
+        sf.check_initialized()
+        return sf
+
     def _createSpeakerObject(self, request):
         """Create or Update speaker object"""
         # preload necessary data items
@@ -534,6 +546,16 @@ class ConferenceApi(remote.Service):
         """Update & return speaker object"""
         return self._createSpeakerObject(request)
 
+
+    @endpoints.method(message_types.VoidMessage, SpeakerForms,
+        path='speaker/all', http_method='GET', name='getSpeakers')
+    def getSpeakers(self, request):
+        """Get list of all speakers"""
+        speakers = Speaker.query()
+        # return set of SpeakerForm objects per Speaker
+        return SpeakerForms(items=[self._copySpeakerToForm(speaker)\
+         for speaker in speakers]
+        )
 
 # - - - Profile objects - - - - - - - - - - - - - - - - - - -
 

@@ -105,19 +105,24 @@ class Speaker(ndb.Model):
     sessionKeys = ndb.KeyProperty(repeated=True)
 
 class SpeakerForm(messages.Message):
+    """SpeakerForm -- Speaker outbound form message"""
     name = messages.StringField(1)
     company = messages.StringField(2)
     email = messages.StringField(3)
     phone = messages.StringField(4)
     websiteUrl = messages.StringField(5)
-    websafeKey = messages.StringField(6, repeated=True)
+    websafeKey = messages.StringField(6)
+
+class SpeakerForms(messages.Message):
+    """SpeakerForms -- multiple Speaker outbound form message"""
+    items = messages.MessageField(SpeakerForm, 1, repeated=True)
 
 ### Session ###
 
 class Session(ndb.Model):
     """Session -- Session object"""
     name = ndb.StringProperty(required=True)
-    highlights = ndb.StringProperty()
+    highlights = ndb.StringProperty(repeated=True)
     speaker = ndb.KeyProperty(required=True)
     duration = ndb.IntegerProperty()
     typeOfSession = ndb.StringProperty(default='NOT_SPECIFIED')
@@ -127,7 +132,7 @@ class Session(ndb.Model):
 class SessionForm(messages.Message):
     """SessionForm -- Session outbound form message"""
     name = messages.StringField(1)
-    highlights = messages.StringField(2)
+    highlights = messages.StringField(2, repeated=True)
     duration = messages.IntegerField(3, variant=messages.Variant.INT32)
     typeOfSession = messages.EnumField('SessionType', 4)
     date = messages.StringField(5) #DateField
