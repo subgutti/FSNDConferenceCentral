@@ -112,6 +112,17 @@ SESSION_SPEAKER_GET_REQUEST = endpoints.ResourceContainer(
     websafeSpeakerKey=messages.StringField(2, required=True)
 )
 
+SESSION_DATE_GET_REQUEST = endpoints.ResourceContainer(
+    message_types.VoidMessage,
+    date=messages.StringField(1, required=True)
+)
+
+SESSION_TYPE_STARTTIME_GET_REQUEST = endpoints.ResourceContainer(
+    message_types.VoidMessage,
+    startTime=messages.StringField(1, required=True),
+    typeOfSession=messages.EnumField(SessionType, 2, required=True)
+)
+
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 
@@ -513,6 +524,66 @@ class ConferenceApi(remote.Service):
 
         return sessions
 
+    def _getSessionsOnDateSortByDuration(self, request):
+        if not request.date:
+            raise endpoints.BadRequestException("'date' field required")
+
+        date = datetime.strptime(request.date, '%Y-%m-%d').date()
+        # Get all sessions on a given date sorted by duration
+        q = Session.query()
+        q = q.filter(Session.date==date)
+        q = q.order(Session.duration)
+        return q
+
+    def _getSessionsOnDateSortByStarttime(self, request):
+        if not request.date:
+            raise endpoints.BadRequestException("'date' field required")
+
+        date = datetime.strptime(request.date, '%Y-%m-%d').date()
+        # Get all sessions on a given date sorted by duration
+        q = Session.query()
+        q = q.filter(Session.date==date)
+        q = q.order(Session.startTime)
+        return q
+
+    def _getSessionsOfTypeAndStarttime(self, request):
+        if not request.startTime:
+            raise endpoints.BadRequestException("'startTime' field required")
+
+        if not request.typeOfSession:
+            raise endpoints.BadRequestException("'sessionType' field required")
+
+        starttime = datetime.strptime(request.startTime, '%H:%M').time()
+
+        # Get all sessions of given type and start time after the given
+        q = Session.query()
+        q = q.filter(Session.startTime>=starttime)
+        q = q.filter(Session.typeOfSession==str(request.typeOfSession))
+
+        return q
+
+
+    def _getSessionsOfNotTypeAndStarttime(self, request):
+        if not request.startTime:
+            raise endpoints.BadRequestException("'startTime' field required")
+
+        if not request.typeOfSession:
+            raise endpoints.BadRequestException("'sessionType' field required")
+
+        starttime = datetime.strptime(request.startTime, '%H:%M').time()
+
+        # Get all session types and remove the not interested one
+        sessionTypes = SessionType.to_dict().keys()
+        sessionTypes.remove(str(request.typeOfSession))
+        sessionTypesFilter = [Session.typeOfSession == sessionType for sessionType in sessionTypes]
+
+        # Get all sessions of not given type and start time before the given
+        q = Session.query(ndb.OR(*sessionTypesFilter))
+        q = q.filter(Session.startTime <= starttime)
+        q = q.order(Session.startTime)
+
+        return q
+
 
     @endpoints.method(SESSION_POST_REQUEST, SessionForm,
             path='conference/{websafeConferenceKey}/createSession',
@@ -579,6 +650,50 @@ class ConferenceApi(remote.Service):
     def getSessionsInWishlist(self, request):
         """Get list of sessions in user's wishlist"""
         sessions = self._getSessionsInWishlist()
+        return SessionForms(
+                items=[self._copySessionToForm(session) for session in \
+                sessions])
+
+
+    @endpoints.method(SESSION_DATE_GET_REQUEST, SessionForms,
+            path='sessions/date/duration',
+            http_method='GET', name='getSessionsOnDateSortByDuration')
+    def getSessionsOnDateSortByDuration(self, request):
+        """Get list of sessions in the given date sorted by duration"""
+        sessions = self._getSessionsOnDateSortByDuration(request)
+        return SessionForms(
+                items=[self._copySessionToForm(session) for session in \
+                sessions])
+
+
+    @endpoints.method(SESSION_DATE_GET_REQUEST, SessionForms,
+            path='sessions/date/starttime',
+            http_method='GET', name='getSessionsOnDateSortByStartTime')
+    def getSessionsOnDateSortByStartTime(self, request):
+        """Get list of sessions in the given date sorted by start time"""
+        sessions = self._getSessionsOnDateSortByStarttime(request)
+        return SessionForms(
+                items=[self._copySessionToForm(session) for session in \
+                sessions])
+
+    @endpoints.method(SESSION_TYPE_STARTTIME_GET_REQUEST, SessionForms,
+            path='sessions/type/starttime',
+            http_method='GET', name='getSessionsOfTypeAndStarttime')
+    def getSessionsOfTypeAndStarttime(self, request):
+        """Get list of sessions of given type and start time"""
+        sessions = self._getSessionsOfTypeAndStarttime(request)
+        return SessionForms(
+                items=[self._copySessionToForm(session) for session in \
+                sessions])
+
+
+
+    @endpoints.method(SESSION_TYPE_STARTTIME_GET_REQUEST, SessionForms,
+            path='sessions/type/starttime/not',
+            http_method='GET', name='getSessionsOfNotTypeAndStarttime')
+    def getSessionsOfNotTypeAndStarttime(self, request):
+        """Get list of sessions of not type and before start time. Sample for double inequality"""
+        sessions = self._getSessionsOfNotTypeAndStarttime(request)
         return SessionForms(
                 items=[self._copySessionToForm(session) for session in \
                 sessions])
