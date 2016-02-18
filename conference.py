@@ -38,8 +38,10 @@ from utils import getUserId
 EMAIL_SCOPE = endpoints.EMAIL_SCOPE
 API_EXPLORER_CLIENT_ID = endpoints.API_EXPLORER_CLIENT_ID
 MEMCACHE_ANNOUNCEMENTS_KEY = "RECENT_ANNOUNCEMENTS"
+MEMCACHE_FEATURED_SPEAKER_KEY = "FEATURED_SPEAKER"
 ANNOUNCEMENT_TPL = ('Last chance to attend! The following conferences '
                     'are nearly sold out: %s')
+FEATURE_SPEAKER_ANNOUNCEMENT_TPL = ('Featured speaker %s will be taking following sessions : %s')
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 DEFAULTS = {
@@ -445,6 +447,12 @@ class ConferenceApi(remote.Service):
         speaker.sessionKeys.append(s_key)
         speaker.put()
 
+        # Add task to queue to update featured speaker in memcache
+        taskqueue.add(params={'websafeSpeakerKey': request.websafeSpeakerKey,
+            'websafeConferenceKey': request.websafeConferenceKey},
+            url='/tasks/set_featured_speaker'
+        )
+
         return self._copySessionToForm(s_key.get())
 
     def _getConferenceSessions(self, request):
@@ -737,6 +745,7 @@ class ConferenceApi(remote.Service):
         return request
 
 
+
     @endpoints.method(SpeakerForm, SpeakerForm,
         path='speaker', http_method='POST', name='createSpeaker')
     def createSpeaker(self, request):
@@ -834,6 +843,30 @@ class ConferenceApi(remote.Service):
 # - - - Announcements - - - - - - - - - - - - - - - - - - - -
 
     @staticmethod
+    def _cacheFeaturedSpeaker(websafeSpeakerKey, websafeConferenceKey):
+        """Cache the featured speaker."""
+        # Get speaker object
+        speaker = ndb.Key(urlsafe=websafeSpeakerKey).get()
+        if not speaker:
+            raise endpoints.NotFoundException('No speaker entity found using websafeKey : %s' \
+                % (request.websafeSpeakerKey))
+
+        # Get conference object
+        conference = ndb.Key(urlsafe=websafeConferenceKey).get()
+        if not conference:
+            raise endpoints.NotFoundException('No conference entity found using websafe key : %s' \
+                % (request.websafeConferenceKey))
+
+        sessions = Session.query(ancestor=conference.key).filter(Session.speaker==speaker.key).fetch(projection=[Session.name])
+        sessionNames = [session.name for session in sessions]
+        if len(sessionNames) >= 2:
+            # set featured speaker announcement in cache
+            announcement = FEATURE_SPEAKER_ANNOUNCEMENT_TPL % (speaker.name,
+                ', '.join(sessionNames))
+
+            memcache.set(MEMCACHE_FEATURED_SPEAKER_KEY, announcement)
+
+    @staticmethod
     def _cacheAnnouncement():
         """Create Announcement & assign to memcache; used by
         memcache cron job & putAnnouncement().
@@ -865,6 +898,12 @@ class ConferenceApi(remote.Service):
         """Return Announcement from memcache."""
         return StringMessage(data=memcache.get(MEMCACHE_ANNOUNCEMENTS_KEY) or "")
 
+
+    @endpoints.method(message_types.VoidMessage, StringMessage,
+        path='speaker/featured', http_method='GET', name='getFeaturedSpeaker')
+    def getFeaturedSpeaker(self, request):
+        """Get the featured speaker from memcache"""
+        return StringMessage(data=memcache.get(MEMCACHE_FEATURED_SPEAKER_KEY) or "")
 
 # - - - Registration - - - - - - - - - - - - - - - - - - - -
 

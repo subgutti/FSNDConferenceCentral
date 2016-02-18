@@ -122,3 +122,9 @@ indexes:
 - kind: Session
   properties:
   - name: typeOfSession
+
+- kind: Session
+  ancestor: yes
+  properties:
+  - name: speaker
+  - name: name
