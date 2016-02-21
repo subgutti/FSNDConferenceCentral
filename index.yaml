@@ -116,14 +116,6 @@ indexes:
   - name: name
 
 - kind: Session
-  properties:
-  - name: duration
-
-- kind: Session
-  properties:
-  - name: typeOfSession
-
-- kind: Session
   ancestor: yes
   properties:
   - name: speaker
