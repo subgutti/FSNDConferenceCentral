@@ -38,8 +38,7 @@ From here you can select the 'Conference API v0.1' which will bring a list of al
 
 ## Project tasks design decisions
 
-### Task 1
-*Add Sessions to a Conference*
+### Task 1 : Add Sessions to a Conference
 
 As a part of this task I added two new entities and different apis to the project
 
@@ -80,8 +79,7 @@ class Speaker(ndb.Model):
 * createSpeaker - Create and return Speaker object
 * getSpeakers - Get list of Speakers
 
-### Task 2
-*Add Sessions to User Wishlist*
+### Task 2 : Add Sessions to User Wishlist
 
 For this task modified the Profile entity to also keep track of User's Sessions wishlist and added APIs that allow user to add/remove from their wishlist
 
@@ -103,8 +101,7 @@ class Profile(ndb.Model):
 * removeSessionFromWishlist - Remove Session from user's wishlist
 * getSessionsInWishlist - Get list of Sessions in user's wishlist
 
-### Task 3
-*Work on indexes and queries*
+### Task 3 : Work on indexes and queries
 
 As a part of this task added 4 additional queries that help user to get the list of Sessions with a particular requirement
 
@@ -115,6 +112,8 @@ As a part of this task added 4 additional queries that help user to get the list
 
 Double inequality query:
 The challenging part of this query is Google app engine ndb supports inequality filter on only one entity. It doesn't support a query with inequality on different entities. For the sample query we need to apply inequality on two entities SessionType and startTime. As SessionType is a ENUM set and as it is finite, I turned the inequality to a equality on other ENUM values with ndb.OR. This resulted in a inequality only on startTime.
+
+NOTE: Most of the Session are added to the default date 2015-06-06, so please use this date for the above query apis. Or you can create Sessions on your own and verify the above queries.
 
 Also as a part of this task updated index.yaml inorder to support the above queries. 
 ```
@@ -139,8 +138,7 @@ Also as a part of this task updated index.yaml inorder to support the above quer
   - name: startTime
 ```
 
-### Task 4
-*Add a task*
+### Task 4 : Add a task
 
 When a Session is created, added a task to the default push queue to check if the speaker has multiple sessions in a conference if so update the memcache to feature that speaker. The current featured speaker can be seen through the below api
 
