@@ -111,7 +111,7 @@ As a part of this task added 4 additional queries that help user to get the list
 * getSessionsOfNotTypeAndStarttime - Get list of Session of not type and before start time. Sample for double inequality
 
 Double inequality query:
-The challenging part of this query is Google app engine ndb supports inequality filter on only one entity. It doesn't support a query with inequality on different entities. For the sample query we need to apply inequality on two entities SessionType and startTime. As SessionType is a ENUM set and as it is finite, I turned the inequality to a equality on other ENUM values with ndb.OR. This resulted in a inequality only on startTime.
+Datastore always uses the indexes to find the matching data. Inorder to match the performace requirements it adds a query restriction where an inequality filter can be applied to atmost one property. For the sample query we need to apply inequality on two properties SessionType and startTime. In order to overcome the restriction modfied the SessionType property from inequality filter to an equality filter. As SessionType is a ENUM set and as it is finite, I turned the inequality to a equality on other ENUM values with ndb.OR.
 
 NOTE: Most of the Session are added to the default date 2015-06-06, so please use this date for the above query apis. Or you can create Sessions on your own and verify the above queries.
 
