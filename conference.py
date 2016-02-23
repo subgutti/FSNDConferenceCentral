@@ -512,7 +512,7 @@ class ConferenceApi(remote.Service):
         session = ndb.Key(urlsafe=wssk).get()
         if not session:
             raise endpoints.NotFoundException(
-                'No Session found with key: %s' % wsck)
+                'No Session found with key: %s' % wssk)
 
         # register
         if reg:
@@ -535,8 +535,10 @@ class ConferenceApi(remote.Service):
             else:
                 retval = False
 
-        # write things back to the datastore & return
-        prof.put()
+        if retval:
+            # write things back to the datastore & return
+            prof.put()
+
         return BooleanMessage(data=retval)
 
     def _getSessionsInWishlist(self):
@@ -566,7 +568,7 @@ class ConferenceApi(remote.Service):
             raise endpoints.BadRequestException("'date' field required")
 
         date = datetime.strptime(request.date, '%Y-%m-%d').date()
-        # Get all sessions on a given date sorted by duration
+        # Get all sessions on a given date sorted by start time
         q = Session.query()
         q = q.filter(Session.date == date)
         q = q.order(Session.startTime)
@@ -860,14 +862,14 @@ class ConferenceApi(remote.Service):
         if not speaker:
             raise endpoints.NotFoundException(
                 'No speaker entity found using websafeKey : %s'
-                % (request.websafeSpeakerKey))
+                % (websafeSpeakerKey))
 
         # Get conference object
         conference = ndb.Key(urlsafe=websafeConferenceKey).get()
         if not conference:
             raise endpoints.NotFoundException(
                 'No conference entity found using websafe key : %s'
-                % (request.websafeConferenceKey))
+                % (websafeConferenceKey))
 
         sessions = Session.query(ancestor=conference.key).filter(
             Session.speaker == speaker.key).fetch(projection=[Session.name])
